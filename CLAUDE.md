@@ -33,6 +33,7 @@ The `templates/` directory contains **only files that get scaffolded into user p
 │   ├── channels/               # Channel adapters (base class, Telegram, factory)
 │   ├── chat/                   # Chat route handler, server actions, React UI components
 │   ├── db/                     # SQLite via Drizzle (schema, migrations, api-keys)
+│   ├── security/               # Rate limiting, action budgets, input sanitization
 │   ├── tools/                  # Job creation, GitHub API, Telegram, OpenAI Whisper
 │   └── utils/
 │       └── render-md.js        # Markdown {{include}} processor
@@ -58,13 +59,17 @@ The `templates/` directory contains **only files that get scaffolded into user p
 | `lib/triggers.js` | Trigger middleware — loads `config/TRIGGERS.json` |
 | `lib/utils/render-md.js` | Markdown include and variable processor (`{{filepath}}`, `{{datetime}}`, `{{skills}}`) |
 | `config/index.js` | `withThepopebot()` Next.js config wrapper |
-| `config/instrumentation.js` | `register()` startup hook (loads .env, validates AUTH_SECRET, init DB, starts crons) |
+| `config/instrumentation.js` | `register()` startup hook (loads .env, validates AUTH_SECRET, init DB, starts crons, init security) |
 | `bin/cli.js` | CLI entry point (`thepopebot init`, `setup`, `reset`, `diff`, etc.) |
 | `lib/ai/index.js` | Chat, streaming, and job summary functions |
 | `lib/ai/agent.js` | LangGraph agent with SQLite checkpointing and tool use |
 | `lib/channels/base.js` | Channel adapter base class (normalize messages across platforms) |
 | `lib/db/index.js` | Database initialization — SQLite via Drizzle ORM |
 | `lib/db/api-keys.js` | API key management (SHA-256 hashed, timing-safe verify) |
+| `lib/security/config.js` | Loads `config/SECURITY.json`, deep-merges with defaults, cached singleton |
+| `lib/security/rate-limiter.js` | Sliding-window rate limiter (per IP / API key prefix), 3 tiers |
+| `lib/security/budgets.js` | Per-action-type budget enforcement, notifies on exhaustion |
+| `lib/security/sanitize.js` | Trust classification + prompt injection pattern stripping |
 
 ## NPM Package Exports
 
@@ -171,3 +176,45 @@ Currently used by the Event Handler to load EVENT_HANDLER.md as the LLM system p
 ## Authentication
 
 NextAuth v5 with Credentials provider (email/password), JWT in httpOnly cookies. First visit creates admin account. `requireAuth()` validates sessions in server actions. API routes use `x-api-key` header. `AUTH_SECRET` env var required for session encryption.
+
+## Security Layer (`lib/security/`)
+
+All security features are configured via `config/SECURITY.json` (user-editable, scaffolded by `npx thepopebot init`). Missing file or keys fall back to hardcoded defaults — no errors. All state is in-memory (no database tables).
+
+### Rate Limiting
+
+Sliding-window rate limiter in `api/index.js`, checked **before auth** to block brute-force attacks. Two in-memory stores: one keyed by IP, one by API key prefix.
+
+| Tier | Routes | Default |
+|------|--------|---------|
+| `api` | Authenticated `/api/*` routes | 60 req/min |
+| `public` | `/ping`, `/github/webhook` | 30 req/min |
+| `telegram` | `/telegram/webhook` | 20 req/min |
+
+429 responses include a `Retry-After` header. Cleanup runs every 5 minutes (started by `initRateLimiter()` in `instrumentation.js`).
+
+### Action Budgets
+
+Enforced in `lib/actions.js` via `checkBudget(type)` before dispatch and `recordAction(type)` after success. Resets automatically when the time window expires.
+
+| Action Type | Default Budget |
+|-------------|---------------|
+| `agent` | 10/hour |
+| `command` | 60/hour |
+| `webhook` | 120/hour |
+
+On exhaustion: throws (callers in `cron.js`/`triggers.js` catch naturally) and creates a notification via `createNotification()` (distributed to Telegram subscribers).
+
+### Trust Classification & Input Sanitization
+
+Every incoming request body is tagged with a trust level in `api/index.js` via `tagTrust()`:
+
+| Source | Trust Level | Sanitized? |
+|--------|-------------|------------|
+| `x-api-key` auth | `user-direct` | No |
+| Telegram webhook | `user-indirect` | No |
+| GitHub/public webhook | `external-untrusted` | Yes |
+
+Only `external-untrusted` content is sanitized. Sanitization strips prompt injection patterns (configurable in `SECURITY.json`) and replaces them with `[blocked]`. Applied in:
+- `api/index.js` — GitHub webhook log content before it reaches `summarizeJob()`
+- `lib/triggers.js` — resolved `command` and `job` template strings
