@@ -7,6 +7,8 @@ import { chat, summarizeJob } from '../lib/ai/index.js';
 import { createNotification } from '../lib/db/notifications.js';
 import { loadTriggers } from '../lib/triggers.js';
 import { verifyApiKey } from '../lib/db/api-keys.js';
+import { checkRateLimit } from '../lib/security/rate-limiter.js';
+import { classifyTrust, tagTrust, sanitize, TRUST_LEVELS } from '../lib/security/sanitize.js';
 
 // Bot token from env, can be overridden by /telegram/register
 let telegramBotToken = null;
@@ -177,13 +179,16 @@ async function handleGithubWebhook(request) {
       log = await fetchJobLog(jobId, payload.commit_sha);
     }
 
+    // Sanitize log content — it originates from the Docker agent (external)
+    const sanitizedLog = sanitize(log, TRUST_LEVELS.EXTERNAL_UNTRUSTED);
+
     const results = {
       job: payload.job || '',
       pr_url: payload.pr_url || payload.run_url || '',
       run_url: payload.run_url || '',
       status: payload.status || '',
       merge_result: payload.merge_result || '',
-      log,
+      log: sanitizedLog,
       changed_files: payload.changed_files || [],
       commit_message: payload.commit_message || '',
     };
@@ -220,16 +225,27 @@ async function POST(request) {
   const url = new URL(request.url);
   const routePath = url.pathname.replace(/^\/api/, '');
 
+  // Rate limit check (before auth to catch brute-force attacks)
+  const rateLimitError = checkRateLimit(routePath, request);
+  if (rateLimitError) return rateLimitError;
+
   // Auth check
   const authError = checkAuth(routePath, request);
   if (authError) return authError;
+
+  // Determine trust level based on auth source
+  const authSource = PUBLIC_ROUTES.includes(routePath)
+    ? (routePath === '/telegram/webhook' ? 'telegram' : 'public-webhook')
+    : 'api-key';
+  const trustLevel = classifyTrust(authSource);
 
   // Fire triggers (non-blocking)
   try {
     const fireTriggers = getFireTriggers();
     // Clone request to read body for triggers without consuming it for the handler
     const clonedRequest = request.clone();
-    const body = await clonedRequest.json().catch(() => ({}));
+    let body = await clonedRequest.json().catch(() => ({}));
+    body = tagTrust(body, trustLevel);
     const query = Object.fromEntries(url.searchParams);
     const headers = Object.fromEntries(request.headers);
     fireTriggers(routePath, body, query, headers);
@@ -250,6 +266,10 @@ async function POST(request) {
 async function GET(request) {
   const url = new URL(request.url);
   const routePath = url.pathname.replace(/^\/api/, '');
+
+  // Rate limit check (before auth to catch brute-force attacks)
+  const rateLimitError = checkRateLimit(routePath, request);
+  if (rateLimitError) return rateLimitError;
 
   // Auth check
   const authError = checkAuth(routePath, request);

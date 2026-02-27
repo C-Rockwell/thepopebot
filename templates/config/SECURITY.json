@@ -1,0 +1,34 @@
+{
+  "rateLimits": {
+    "enabled": true,
+    "tiers": {
+      "api": { "maxRequests": 60, "windowMs": 60000 },
+      "public": { "maxRequests": 30, "windowMs": 60000 },
+      "telegram": { "maxRequests": 20, "windowMs": 60000 }
+    }
+  },
+  "budgets": {
+    "enabled": true,
+    "limits": {
+      "agent": { "maxActions": 10, "windowMs": 3600000 },
+      "command": { "maxActions": 60, "windowMs": 3600000 },
+      "webhook": { "maxActions": 120, "windowMs": 3600000 }
+    }
+  },
+  "sanitization": {
+    "enabled": true,
+    "logBlocked": true,
+    "stripPatterns": [
+      "ignore previous instructions",
+      "ignore all previous",
+      "disregard previous",
+      "override system prompt",
+      "you are now",
+      "new instructions:",
+      "system: ",
+      "\\[INST\\]",
+      "<<SYS>>",
+      "<\\|im_start\\|>system"
+    ]
+  }
+}

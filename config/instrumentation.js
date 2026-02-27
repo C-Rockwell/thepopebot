@@ -58,5 +58,11 @@ export async function register() {
     if (stored) setUpdateAvailable(stored);
   } catch {}
 
+  // Initialize security (rate limiter cleanup + config pre-load)
+  const { getSecurityConfig } = await import('../lib/security/config.js');
+  const { initRateLimiter } = await import('../lib/security/rate-limiter.js');
+  getSecurityConfig();
+  initRateLimiter();
+
   console.log('thepopebot initialized');
 }
