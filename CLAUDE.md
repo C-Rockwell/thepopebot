@@ -33,6 +33,7 @@ The `templates/` directory contains **only files that get scaffolded into user p
 │   ├── channels/               # Channel adapters (base class, Telegram, factory)
 │   ├── chat/                   # Chat route handler, server actions, React UI components
 │   ├── db/                     # SQLite via Drizzle (schema, migrations, api-keys)
+│   ├── memory/                 # Persistent memory system (FTS5, embeddings, decay)
 │   ├── security/               # Rate limiting, action budgets, input sanitization
 │   ├── tools/                  # Job creation, GitHub API, Telegram, OpenAI Whisper
 │   └── utils/
@@ -59,7 +60,7 @@ The `templates/` directory contains **only files that get scaffolded into user p
 | `lib/triggers.js` | Trigger middleware — loads `config/TRIGGERS.json` |
 | `lib/utils/render-md.js` | Markdown include and variable processor (`{{filepath}}`, `{{datetime}}`, `{{skills}}`) |
 | `config/index.js` | `withThepopebot()` Next.js config wrapper |
-| `config/instrumentation.js` | `register()` startup hook (loads .env, validates AUTH_SECRET, init DB, starts crons, init security) |
+| `config/instrumentation.js` | `register()` startup hook (loads .env, validates AUTH_SECRET, init DB, starts crons, init security, init memory) |
 | `bin/cli.js` | CLI entry point (`thepopebot init`, `setup`, `reset`, `diff`, etc.) |
 | `lib/ai/index.js` | Chat, streaming, and job summary functions |
 | `lib/ai/agent.js` | LangGraph agent with SQLite checkpointing and tool use |
@@ -70,6 +71,14 @@ The `templates/` directory contains **only files that get scaffolded into user p
 | `lib/security/rate-limiter.js` | Sliding-window rate limiter (per IP / API key prefix), 3 tiers |
 | `lib/security/budgets.js` | Per-action-type budget enforcement, notifies on exhaustion |
 | `lib/security/sanitize.js` | Trust classification + prompt injection pattern stripping |
+| `lib/memory/config.js` | Loads `config/MEMORY.json`, deep-merges with defaults, cached singleton |
+| `lib/memory/manager.js` | Core memory CRUD, FTS5/semantic/hybrid search, initialization |
+| `lib/memory/fts.js` | FTS5 virtual table setup, sync triggers, full-text search |
+| `lib/memory/embeddings.js` | OpenAI embedding generation, cosine similarity, buffer conversion |
+| `lib/memory/decay.js` | Exponential salience decay, reinforcement on access, periodic cleanup |
+| `lib/memory/integrity.js` | SHA-256 checksums, poison detection, memory flagging |
+| `lib/memory/summarize.js` | Conversation summarization, job summary memory capture |
+| `lib/db/memories.js` | Drizzle query functions for memories + audit log tables |
 
 ## NPM Package Exports
 
@@ -103,6 +112,8 @@ SQLite via Drizzle ORM at `data/thepopebot.sqlite` (override with `DATABASE_PATH
 | `notifications` | Job completion notifications |
 | `subscriptions` | Channel subscriptions |
 | `settings` | Key-value configuration store (also stores API keys) |
+| `memories` | Persistent memory entries (content, summary, embeddings, salience scores) |
+| `memory_audit_log` | Audit trail for memory operations (create, access, update, decay, delete, flag) |
 
 ### Migration Rules
 
@@ -202,6 +213,7 @@ Enforced in `lib/actions.js` via `checkBudget(type)` before dispatch and `record
 | `agent` | 10/hour |
 | `command` | 60/hour |
 | `webhook` | 120/hour |
+| `memory_summarize` | 5/hour |
 
 On exhaustion: throws (callers in `cron.js`/`triggers.js` catch naturally) and creates a notification via `createNotification()` (distributed to Telegram subscribers).
 
@@ -218,3 +230,52 @@ Every incoming request body is tagged with a trust level in `api/index.js` via `
 Only `external-untrusted` content is sanitized. Sanitization strips prompt injection patterns (configurable in `SECURITY.json`) and replaces them with `[blocked]`. Applied in:
 - `api/index.js` — GitHub webhook log content before it reaches `summarizeJob()`
 - `lib/triggers.js` — resolved `command` and `job` template strings
+
+## Memory System (`lib/memory/`)
+
+Persistent memory gives the agent context across sessions. Configured via `config/MEMORY.json` (user-editable, scaffolded by `npx thepopebot init`). Missing file or keys fall back to hardcoded defaults.
+
+### Architecture
+
+Two-tier search system:
+- **Tier 1 (FTS5)**: SQLite full-text search on memory `content` + `summary` fields via `memories_fts` virtual table. Always available.
+- **Tier 2 (Vector Embeddings)**: OpenAI `text-embedding-3-small` embeddings stored as blobs. Requires `OPENAI_API_KEY`. Graceful degradation — if unavailable, falls back to FTS5-only search.
+
+**Hybrid search** combines FTS5 keyword relevance (40% weight) + vector cosine similarity (60% weight) and re-ranks results.
+
+### Salience Decay
+
+Memories have a `salienceScore` (0.0–1.0) that decays exponentially over time:
+- **Decay**: `score = initial × 0.5^(elapsed / halfLife)` — default half-life: 7 days
+- **Reinforcement**: Accessing a memory bumps score by `+0.3` (capped at 1.0)
+- **Pruning**: Memories below `minScore` (0.1) are auto-deleted with audit trail
+- Decay job runs hourly (started in `instrumentation.js`)
+
+### Auto-Capture
+
+Memories are created automatically from:
+- **Conversations**: Summarized after 3+ exchanges via LLM (budget: 5/hour via `memory_summarize`)
+- **Job summaries**: Stored when `summarizeJob()` completes
+
+### Integrity & Poison Detection
+
+- SHA-256 checksums cover content + embedding (stored in `tags.checksum`)
+- Poison detection scans for instruction-like patterns before storage (configurable in `MEMORY.json`)
+- Flagged memories get `tags.flagged = true` + audit log entry
+
+### Agent Tool
+
+The `search_memory` tool is available to the LangGraph agent for querying memories during conversations. Pi (Docker agent) does not have direct memory access — relevant memories are injected into job prompts.
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `lib/memory/config.js` | Singleton config loader (`MEMORY.json` + defaults) |
+| `lib/memory/manager.js` | `createMemory()`, `searchMemories()`, `semanticSearch()`, `hybridSearch()`, `getRelevantMemories()`, `initMemorySystem()` |
+| `lib/memory/fts.js` | FTS5 virtual table setup + `searchFts()` |
+| `lib/memory/embeddings.js` | `generateEmbedding()`, `cosineSimilarity()`, buffer conversion |
+| `lib/memory/decay.js` | `decayMemories()`, `reinforceMemory()`, `startDecayTimer()` |
+| `lib/memory/integrity.js` | `computeChecksum()`, `detectPoisoning()`, `flagMemory()` |
+| `lib/memory/summarize.js` | `summarizeConversation()`, `storeJobSummary()` |
+| `lib/db/memories.js` | Drizzle CRUD for `memories` + `memory_audit_log` tables |

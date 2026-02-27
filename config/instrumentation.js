@@ -64,5 +64,15 @@ export async function register() {
   getSecurityConfig();
   initRateLimiter();
 
+  // Initialize memory system (FTS5, vector tables, decay timer)
+  try {
+    const { initMemorySystem } = await import('../lib/memory/manager.js');
+    const { startDecayTimer } = await import('../lib/memory/decay.js');
+    initMemorySystem();
+    startDecayTimer();
+  } catch (err) {
+    console.error('[memory] Failed to initialize:', err.message);
+  }
+
   console.log('thepopebot initialized');
 }

@@ -12,7 +12,8 @@
     "limits": {
       "agent": { "maxActions": 10, "windowMs": 3600000 },
       "command": { "maxActions": 60, "windowMs": 3600000 },
-      "webhook": { "maxActions": 120, "windowMs": 3600000 }
+      "webhook": { "maxActions": 120, "windowMs": 3600000 },
+      "memory_summarize": { "maxActions": 5, "windowMs": 3600000 }
     }
   },
   "sanitization": {

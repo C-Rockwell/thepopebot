@@ -1,0 +1,37 @@
+{
+  "enabled": true,
+  "tier1": {
+    "maxMemories": 10000,
+    "defaultSalienceScore": 1.0,
+    "decay": {
+      "curve": "exponential",
+      "halfLifeMs": 604800000,
+      "minScore": 0.1,
+      "reinforceAmount": 0.3
+    },
+    "search": {
+      "maxResults": 10,
+      "minSalienceScore": 0.2
+    }
+  },
+  "tier2": {
+    "enabled": true,
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536
+  },
+  "autoCapture": {
+    "conversations": true,
+    "jobSummaries": true,
+    "minExchanges": 3
+  },
+  "poisonDetection": {
+    "enabled": true,
+    "patterns": [
+      "ignore previous",
+      "you are now",
+      "system:",
+      "ignore all"
+    ]
+  }
+}
