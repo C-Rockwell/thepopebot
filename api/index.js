@@ -9,6 +9,7 @@ import { loadTriggers } from '../lib/triggers.js';
 import { verifyApiKey } from '../lib/db/api-keys.js';
 import { checkRateLimit } from '../lib/security/rate-limiter.js';
 import { classifyTrust, tagTrust, sanitize, TRUST_LEVELS } from '../lib/security/sanitize.js';
+import { isKilled } from '../lib/observe/killswitch.js';
 
 // Bot token from env, can be overridden by /telegram/register
 let telegramBotToken = null;
@@ -33,6 +34,9 @@ function getFireTriggers() {
 
 // Routes that have their own authentication
 const PUBLIC_ROUTES = ['/telegram/webhook', '/github/webhook', '/ping'];
+
+// Routes exempt from kill switch (must always be reachable)
+const KILLSWITCH_EXEMPT_ROUTES = ['/ping', '/github/webhook'];
 
 /**
  * Timing-safe string comparison.
@@ -246,6 +250,11 @@ async function POST(request) {
   const authError = checkAuth(routePath, request);
   if (authError) return authError;
 
+  // Kill switch — return 503 for non-exempt routes
+  if (isKilled() && !KILLSWITCH_EXEMPT_ROUTES.includes(routePath)) {
+    return Response.json({ error: 'Service unavailable — kill switch is active' }, { status: 503 });
+  }
+
   // Determine trust level based on auth source
   const authSource = PUBLIC_ROUTES.includes(routePath)
     ? (routePath === '/telegram/webhook' ? 'telegram' : 'public-webhook')
@@ -287,6 +296,11 @@ async function GET(request) {
   // Auth check
   const authError = checkAuth(routePath, request);
   if (authError) return authError;
+
+  // Kill switch — return 503 for non-exempt routes
+  if (isKilled() && !KILLSWITCH_EXEMPT_ROUTES.includes(routePath)) {
+    return Response.json({ error: 'Service unavailable — kill switch is active' }, { status: 503 });
+  }
 
   switch (routePath) {
     case '/ping':           return Response.json({ message: 'Pong!' });

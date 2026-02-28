@@ -43,9 +43,17 @@ export async function register() {
   const { initDatabase } = await import('../lib/db/index.js');
   initDatabase();
 
-  // Start cron scheduler
+  // Initialize kill switch (reads persisted state before crons start)
+  const { initKillSwitch, isKilled } = await import('../lib/observe/killswitch.js');
+  initKillSwitch();
+
+  // Start cron scheduler (skip if kill switch is active)
   const { loadCrons } = await import('../lib/cron.js');
-  loadCrons();
+  if (!isKilled()) {
+    loadCrons();
+  } else {
+    console.log('[cron] Skipping cron load — kill switch is active');
+  }
 
   // Start built-in crons (version check)
   const { startBuiltinCrons, setUpdateAvailable } = await import('../lib/cron.js');
@@ -80,6 +88,28 @@ export async function register() {
     const vc = getVoiceConfig();
     if (vc.enabled) console.log('[voice] Voice system enabled');
   } catch {}
+
+  // Initialize observability (anomaly detection + log pruning)
+  try {
+    const { getObserveConfig } = await import('../lib/observe/config.js');
+    const { startAnomalyTimer } = await import('../lib/observe/anomaly.js');
+    const { pruneActionLog } = await import('../lib/observe/logger.js');
+    const oc = getObserveConfig();
+
+    if (oc.anomaly.enabled) {
+      startAnomalyTimer();
+    }
+
+    // Prune old action log entries daily
+    const pruneInterval = setInterval(pruneActionLog, 24 * 60 * 60 * 1000);
+    pruneInterval.unref();
+    // Run once on startup
+    pruneActionLog();
+
+    console.log('[observe] Observability system initialized');
+  } catch (err) {
+    console.error('[observe] Failed to initialize:', err.message);
+  }
 
   console.log('thepopebot initialized');
 }

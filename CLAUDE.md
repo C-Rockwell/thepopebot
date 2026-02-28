@@ -37,6 +37,7 @@ The `templates/` directory contains **only files that get scaffolded into user p
 │   ├── security/               # Rate limiting, action budgets, input sanitization
 │   ├── tools/                  # Job creation, GitHub API, Telegram, OpenAI Whisper
 │   ├── voice/                  # Voice subsystem (STT, TTS, config)
+│   ├── observe/                # Observability (action logging, kill switch, anomaly detection)
 │   └── utils/
 │       └── render-md.js        # Markdown {{include}} processor
 ├── config/
@@ -61,7 +62,7 @@ The `templates/` directory contains **only files that get scaffolded into user p
 | `lib/triggers.js` | Trigger middleware — loads `config/TRIGGERS.json` |
 | `lib/utils/render-md.js` | Markdown include and variable processor (`{{filepath}}`, `{{datetime}}`, `{{skills}}`) |
 | `config/index.js` | `withThepopebot()` Next.js config wrapper |
-| `config/instrumentation.js` | `register()` startup hook (loads .env, validates AUTH_SECRET, init DB, starts crons, init security, init memory, init voice) |
+| `config/instrumentation.js` | `register()` startup hook (loads .env, validates AUTH_SECRET, init DB, init kill switch, starts crons, init security, init memory, init voice, init observe) |
 | `bin/cli.js` | CLI entry point (`thepopebot init`, `setup`, `reset`, `diff`, etc.) |
 | `lib/ai/index.js` | Chat, streaming, and job summary functions |
 | `lib/ai/agent.js` | LangGraph agent with SQLite checkpointing and tool use |
@@ -80,6 +81,12 @@ The `templates/` directory contains **only files that get scaffolded into user p
 | `lib/memory/integrity.js` | SHA-256 checksums, poison detection, memory flagging |
 | `lib/memory/summarize.js` | Conversation summarization, job summary memory capture |
 | `lib/db/memories.js` | Drizzle query functions for memories + audit log tables |
+| `lib/observe/config.js` | Loads `config/OBSERVE.json`, deep-merges with defaults, cached singleton |
+| `lib/observe/logger.js` | Action logging to `action_log` table, log pruning by retention |
+| `lib/observe/killswitch.js` | Kill switch: activate/deactivate, persist to settings table, stop/restart crons |
+| `lib/observe/anomaly.js` | Periodic anomaly detection (frequency spikes, off-hours, errors, budget warnings) |
+| `lib/db/action-log.js` | Drizzle query functions for `action_log` table |
+| `lib/db/anomaly-alerts.js` | Drizzle query functions for `anomaly_alerts` table |
 
 ## NPM Package Exports
 
@@ -115,6 +122,8 @@ SQLite via Drizzle ORM at `data/thepopebot.sqlite` (override with `DATABASE_PATH
 | `settings` | Key-value configuration store (also stores API keys) |
 | `memories` | Persistent memory entries (content, summary, embeddings, salience scores) |
 | `memory_audit_log` | Audit trail for memory operations (create, access, update, decay, delete, flag) |
+| `action_log` | Dispatched action history (type, source, status, timing, errors) |
+| `anomaly_alerts` | Anomaly detection alerts (frequency spikes, off-hours, errors, budget warnings) |
 
 ### Migration Rules
 
@@ -316,3 +325,51 @@ Voice capabilities: multi-provider STT (speech-to-text), TTS (text-to-speech), a
 | `lib/voice/stt.js` | Multi-provider STT with fallback (`transcribe()`, `isSttEnabled()`) |
 | `lib/voice/tts.js` | OpenAI TTS (`synthesize()`, `isTtsEnabled()`) |
 | `lib/tools/openai.js` | Backward-compatible re-exports from `lib/voice/stt.js` |
+
+## Observability Layer (`lib/observe/`)
+
+Mission Control dashboard and observability features. Configured via `config/OBSERVE.json` (user-editable, scaffolded by `npx thepopebot init`). Missing file or keys fall back to hardcoded defaults.
+
+### Action Logging
+
+Every dispatched action (cron, trigger, API) is logged to the `action_log` table via `logAction()` in `lib/observe/logger.js`. The wrapper in `lib/actions.js` records timing, status, errors, and source metadata. Old entries are pruned daily based on `logger.retentionDays` (default: 30 days).
+
+### Kill Switch
+
+In-memory flag persisted to the `settings` table. When active:
+- All `executeAction()` calls throw immediately
+- `fireTriggers()` returns immediately
+- `/api` routes return `503 Service Unavailable` (except `/ping` and `/github/webhook`)
+- All cron tasks are stopped via `stopAllCrons()`
+
+On deactivation, crons restart via `restartCrons()`. State survives server restarts — `initKillSwitch()` reads persisted state in `instrumentation.js` and skips `loadCrons()` if active.
+
+### Anomaly Detection
+
+Periodic checks (default: every 15 min) via `startAnomalyTimer()`:
+
+| Check | Description | Severity |
+|-------|-------------|----------|
+| **Frequency spike** | Actions in last 15 min > 3x the 7-day rolling average (min 5 actions) | warning/critical |
+| **Off-hours activity** | Actions outside normal hours (6–23) exceeding threshold (5) | warning |
+| **Repeated errors** | Same action name failed > 3 times in the last hour | warning/critical |
+| **Budget warning** | Any budget type > 80% consumed | warning/critical |
+
+Alerts are deduplicated per type per hour. Warning/critical alerts create notifications via `createNotification()`.
+
+### Dashboard (Mission Control)
+
+Server actions in `lib/chat/actions.js`: `getDashboardData()`, `getActionLog()`, `toggleKillSwitch()`, `acknowledgeAnomaly()`, `acknowledgeAllAnomalies()`.
+
+UI at `/dashboard` — auto-refreshes every 10s. Layout: kill switch panel, system status + budget usage, anomaly alerts, paginated action log.
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `lib/observe/config.js` | Singleton config loader (`OBSERVE.json` + defaults) |
+| `lib/observe/logger.js` | `logAction()`, `pruneActionLog()` |
+| `lib/observe/killswitch.js` | `activateKillSwitch()`, `deactivateKillSwitch()`, `isKilled()`, `initKillSwitch()` |
+| `lib/observe/anomaly.js` | `checkAnomalies()`, `startAnomalyTimer()` |
+| `lib/db/action-log.js` | Drizzle CRUD for `action_log` table |
+| `lib/db/anomaly-alerts.js` | Drizzle CRUD for `anomaly_alerts` table |

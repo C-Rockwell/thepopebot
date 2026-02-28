@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { CirclePlusIcon, PanelLeftIcon, MessageIcon, BellIcon, SwarmIcon, ArrowUpCircleIcon, LifeBuoyIcon } from './icons.js';
-import { getUnreadNotificationCount, getAppVersion } from '../actions.js';
+import { CirclePlusIcon, PanelLeftIcon, MessageIcon, BellIcon, SwarmIcon, DashboardIcon, ArrowUpCircleIcon, LifeBuoyIcon } from './icons.js';
+import { getUnreadNotificationCount, getAppVersion, getDashboardData } from '../actions.js';
 import { SidebarHistory } from './sidebar-history.js';
 import { SidebarUserNav } from './sidebar-user-nav.js';
 import { UpgradeDialog } from './upgrade-dialog.js';
@@ -26,6 +26,7 @@ export function AppSidebar({ user }) {
   const { state, open, setOpenMobile, toggleSidebar } = useSidebar();
   const collapsed = state === 'collapsed';
   const [unreadCount, setUnreadCount] = useState(0);
+  const [killSwitchActive, setKillSwitchActive] = useState(false);
   const [version, setVersion] = useState('');
   const [updateAvailable, setUpdateAvailable] = useState(null);
   const [changelog, setChangelog] = useState(null);
@@ -40,6 +41,11 @@ export function AppSidebar({ user }) {
         setVersion(version);
         setUpdateAvailable(updateAvailable);
         setChangelog(changelog);
+      })
+      .catch(() => {});
+    getDashboardData()
+      .then((data) => {
+        if (data?.killSwitch?.active) setKillSwitchActive(true);
       })
       .catch(() => {});
   }, []);
@@ -126,6 +132,38 @@ export function AppSidebar({ user }) {
               </TooltipTrigger>
               {collapsed && (
                 <TooltipContent side="right">Swarm</TooltipContent>
+              )}
+            </Tooltip>
+          </SidebarMenuItem>
+
+          {/* Mission Control */}
+          <SidebarMenuItem>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <SidebarMenuButton
+                  className={collapsed ? 'justify-center' : ''}
+                  onClick={() => {
+                    window.location.href = '/dashboard';
+                  }}
+                >
+                  <span className="relative">
+                    <DashboardIcon size={16} />
+                    {killSwitchActive && collapsed && (
+                      <span className="absolute -top-1 -right-1 inline-block h-2 w-2 rounded-full bg-red-500" />
+                    )}
+                  </span>
+                  {!collapsed && (
+                    <span className="flex items-center gap-2">
+                      Mission Control
+                      {killSwitchActive && (
+                        <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+                      )}
+                    </span>
+                  )}
+                </SidebarMenuButton>
+              </TooltipTrigger>
+              {collapsed && (
+                <TooltipContent side="right">Mission Control</TooltipContent>
               )}
             </Tooltip>
           </SidebarMenuItem>
