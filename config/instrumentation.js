@@ -74,5 +74,12 @@ export async function register() {
     console.error('[memory] Failed to initialize:', err.message);
   }
 
+  // Initialize voice system (config pre-load only — no DB, no timers)
+  try {
+    const { getVoiceConfig } = await import('../lib/voice/config.js');
+    const vc = getVoiceConfig();
+    if (vc.enabled) console.log('[voice] Voice system enabled');
+  } catch {}
+
   console.log('thepopebot initialized');
 }

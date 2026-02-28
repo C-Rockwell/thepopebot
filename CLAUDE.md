@@ -36,6 +36,7 @@ The `templates/` directory contains **only files that get scaffolded into user p
 │   ├── memory/                 # Persistent memory system (FTS5, embeddings, decay)
 │   ├── security/               # Rate limiting, action budgets, input sanitization
 │   ├── tools/                  # Job creation, GitHub API, Telegram, OpenAI Whisper
+│   ├── voice/                  # Voice subsystem (STT, TTS, config)
 │   └── utils/
 │       └── render-md.js        # Markdown {{include}} processor
 ├── config/
@@ -55,12 +56,12 @@ The `templates/` directory contains **only files that get scaffolded into user p
 |------|---------|
 | `api/index.js` | Next.js GET/POST route handlers for all `/api/*` endpoints |
 | `lib/paths.js` | Central path resolver — all paths resolve from user's `process.cwd()` |
-| `lib/actions.js` | Shared action dispatcher for agent/command/webhook actions |
+| `lib/actions.js` | Shared action dispatcher for agent/command/webhook/voice actions |
 | `lib/cron.js` | Cron scheduler — loads `config/CRONS.json` at server start |
 | `lib/triggers.js` | Trigger middleware — loads `config/TRIGGERS.json` |
 | `lib/utils/render-md.js` | Markdown include and variable processor (`{{filepath}}`, `{{datetime}}`, `{{skills}}`) |
 | `config/index.js` | `withThepopebot()` Next.js config wrapper |
-| `config/instrumentation.js` | `register()` startup hook (loads .env, validates AUTH_SECRET, init DB, starts crons, init security, init memory) |
+| `config/instrumentation.js` | `register()` startup hook (loads .env, validates AUTH_SECRET, init DB, starts crons, init security, init memory, init voice) |
 | `bin/cli.js` | CLI entry point (`thepopebot init`, `setup`, `reset`, `diff`, etc.) |
 | `lib/ai/index.js` | Chat, streaming, and job summary functions |
 | `lib/ai/agent.js` | LangGraph agent with SQLite checkpointing and tool use |
@@ -143,15 +144,15 @@ SQLite via Drizzle ORM at `data/thepopebot.sqlite` (override with `DATABASE_PATH
 
 ## Action Dispatch System
 
-Both cron jobs and webhook triggers use the same shared dispatch system (`lib/actions.js`). Every action has a `type` field — `"agent"` (default), `"command"`, or `"webhook"`.
+Both cron jobs and webhook triggers use the same shared dispatch system (`lib/actions.js`). Every action has a `type` field — `"agent"` (default), `"command"`, `"webhook"`, or `"voice"`.
 
-| | `agent` | `command` | `webhook` |
-|---|---------|-----------|-----------|
-| **Uses LLM** | Yes — spins up Pi in a Docker container | No — runs a shell command | No — makes an HTTP request |
-| **Runtime** | Minutes to hours | Milliseconds to seconds | Milliseconds to seconds |
-| **Cost** | LLM API calls + GitHub Actions minutes | Free (runs on event handler) | Free (runs on event handler) |
+| | `agent` | `command` | `webhook` | `voice` |
+|---|---------|-----------|-----------|---------|
+| **Uses LLM** | Yes — spins up Pi in a Docker container | No — runs a shell command | No — makes an HTTP request | No — synthesizes speech via TTS API |
+| **Runtime** | Minutes to hours | Milliseconds to seconds | Milliseconds to seconds | Seconds |
+| **Cost** | LLM API calls + GitHub Actions minutes | Free (runs on event handler) | Free (runs on event handler) | TTS API calls |
 
-If the task needs to *think*, use `agent`. If it just needs to *do*, use `command`. If it needs to *call an external service*, use `webhook`.
+If the task needs to *think*, use `agent`. If it just needs to *do*, use `command`. If it needs to *call an external service*, use `webhook`. If it needs to *speak*, use `voice`.
 
 **Agent**: Creates a Docker Agent job via `createJob()`. Pushes a `job/*` branch; `run-job.yml` spins up the container. The `job` string is the LLM task prompt.
 
@@ -166,13 +167,21 @@ If the task needs to *think*, use `agent`. If it just needs to *do*, use `comman
 | `headers` | no | `{}` | Outgoing request headers |
 | `vars` | no | `{}` | Key-value pairs merged into outgoing body |
 
+**Voice**: Synthesizes speech via TTS API and sends audio to a channel. Requires voice system to be enabled (`config/VOICE.json`).
+
+| Voice field | Required | Default | Description |
+|-------------|----------|---------|-------------|
+| `text` | yes | — | Text to synthesize into speech |
+| `channel` | no | `"telegram"` | Target channel to send audio to |
+| `voice` | no | config default | TTS voice (e.g., `"alloy"`, `"echo"`, `"nova"`) |
+
 ### Cron Jobs
 
 Defined in `config/CRONS.json`, loaded by `lib/cron.js` at startup via `node-cron`. Each entry has `name`, `schedule` (cron expression), `type` (`agent`/`command`/`webhook`), and the corresponding action fields (`job`, `command`, or `url`/`method`/`headers`/`vars`). Set `enabled: false` to disable. Agent-type entries support optional `llm_provider` and `llm_model` fields to override the default LLM (passed to Docker agent via `job.config.json`).
 
 ### Webhook Triggers
 
-Defined in `config/TRIGGERS.json`, loaded by `lib/triggers.js`. Each trigger watches an endpoint path (`watch_path`) and fires an array of actions (fire-and-forget, after auth, before route handler). Actions use the same `type`/`job`/`command`/`url` fields as cron jobs, including optional `llm_provider`/`llm_model` overrides. Template tokens in `job` and `command` strings: `{{body}}`, `{{body.field}}`, `{{query}}`, `{{query.field}}`, `{{headers}}`, `{{headers.field}}`.
+Defined in `config/TRIGGERS.json`, loaded by `lib/triggers.js`. Each trigger watches an endpoint path (`watch_path`) and fires an array of actions (fire-and-forget, after auth, before route handler). Actions use the same `type`/`job`/`command`/`url`/`text` fields as cron jobs, including optional `llm_provider`/`llm_model` overrides. Template tokens in `job`, `command`, and `text` strings: `{{body}}`, `{{body.field}}`, `{{query}}`, `{{query.field}}`, `{{headers}}`, `{{headers.field}}`.
 
 ## Markdown File Includes
 
@@ -214,6 +223,7 @@ Enforced in `lib/actions.js` via `checkBudget(type)` before dispatch and `record
 | `command` | 60/hour |
 | `webhook` | 120/hour |
 | `memory_summarize` | 5/hour |
+| `voice` | 30/hour |
 
 On exhaustion: throws (callers in `cron.js`/`triggers.js` catch naturally) and creates a notification via `createNotification()` (distributed to Telegram subscribers).
 
@@ -229,7 +239,7 @@ Every incoming request body is tagged with a trust level in `api/index.js` via `
 
 Only `external-untrusted` content is sanitized. Sanitization strips prompt injection patterns (configurable in `SECURITY.json`) and replaces them with `[blocked]`. Applied in:
 - `api/index.js` — GitHub webhook log content before it reaches `summarizeJob()`
-- `lib/triggers.js` — resolved `command` and `job` template strings
+- `lib/triggers.js` — resolved `command`, `job`, and `text` template strings
 
 ## Memory System (`lib/memory/`)
 
@@ -279,3 +289,30 @@ The `search_memory` tool is available to the LangGraph agent for querying memori
 | `lib/memory/integrity.js` | `computeChecksum()`, `detectPoisoning()`, `flagMemory()` |
 | `lib/memory/summarize.js` | `summarizeConversation()`, `storeJobSummary()` |
 | `lib/db/memories.js` | Drizzle CRUD for `memories` + `memory_audit_log` tables |
+
+## Voice System (`lib/voice/`)
+
+Voice capabilities: multi-provider STT (speech-to-text), TTS (text-to-speech), and a `voice` action type. Configured via `config/VOICE.json` (user-editable, scaffolded by `npx thepopebot init`). **Disabled by default** — set `enabled: true` to activate. Missing file or keys fall back to hardcoded defaults.
+
+### Architecture
+
+- **STT**: Multi-provider with automatic fallback. Primary: Groq (`GROQ_API_KEY`), fallback: OpenAI (`OPENAI_API_KEY`). Both use OpenAI-compatible Whisper API. File size validation against `stt.maxAudioSizeMb`.
+- **TTS**: OpenAI TTS API (`OPENAI_API_KEY`). Configurable voice, speed, and format. Returns audio buffer + MIME type.
+- **Channel Integration**: Telegram adapter detects voice/audio messages, transcribes via STT, optionally responds with TTS audio. Web chat has microphone button for recording voice input.
+- **Voice Actions**: The `voice` action type in crons/triggers synthesizes speech and sends to a channel.
+
+### Environment Variables
+
+| Variable | Required for | Description |
+|----------|-------------|-------------|
+| `GROQ_API_KEY` | STT (primary) | Groq API key for Whisper transcription |
+| `OPENAI_API_KEY` | STT (fallback) + TTS | OpenAI API key (also used by embeddings/memory) |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `lib/voice/config.js` | Singleton config loader (`VOICE.json` + defaults) |
+| `lib/voice/stt.js` | Multi-provider STT with fallback (`transcribe()`, `isSttEnabled()`) |
+| `lib/voice/tts.js` | OpenAI TTS (`synthesize()`, `isTtsEnabled()`) |
+| `lib/tools/openai.js` | Backward-compatible re-exports from `lib/voice/stt.js` |

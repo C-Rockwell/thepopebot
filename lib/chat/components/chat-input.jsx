@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useCallback, useState } from 'react';
-import { SendIcon, StopIcon, PaperclipIcon, XIcon, FileTextIcon } from './icons.js';
+import { SendIcon, StopIcon, PaperclipIcon, XIcon, FileTextIcon, MicrophoneIcon } from './icons.js';
 import { cn } from '../utils.js';
 
 const ACCEPTED_TYPES = [
@@ -10,6 +10,7 @@ const ACCEPTED_TYPES = [
   'text/plain', 'text/markdown', 'text/csv', 'text/html', 'text/css',
   'text/javascript', 'text/x-python', 'text/x-typescript',
   'application/json',
+  'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg',
 ];
 
 const MAX_FILES = 5;
@@ -40,7 +41,9 @@ function getEffectiveType(file) {
 export function ChatInput({ input, setInput, onSubmit, status, stop, files, setFiles }) {
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const isStreaming = status === 'streaming' || status === 'submitted';
 
   // Auto-resize textarea
@@ -112,6 +115,50 @@ export function ChatInput({ input, setInput, onSubmit, status, stop, files, setF
     }
   };
 
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4',
+      });
+      const chunks = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const mimeType = mediaRecorder.mimeType;
+        const ext = mimeType.includes('webm') ? 'webm' : 'mp4';
+        const blob = new Blob(chunks, { type: mimeType });
+        const file = new File([blob], `voice.${ext}`, { type: mimeType });
+        const reader = new FileReader();
+        reader.onload = () => {
+          setFiles((current) => {
+            if (current.length >= MAX_FILES) return current;
+            return [...current, { file, previewUrl: reader.result }];
+          });
+        };
+        reader.readAsDataURL(file);
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Failed to start recording:', err);
+    }
+  }, [setFiles]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    mediaRecorderRef.current = null;
+    setIsRecording(false);
+  }, []);
+
   const canSend = input.trim() || files.length > 0;
 
   return (
@@ -177,13 +224,29 @@ export function ChatInput({ input, setInput, onSubmit, status, stop, files, setF
               ref={fileInputRef}
               type="file"
               multiple
-              accept="image/*,application/pdf,text/*,application/json,.md,.csv,.json,.js,.ts,.jsx,.tsx,.py,.html,.css,.yml,.yaml,.xml,.sh,.rb,.go,.rs,.java,.c,.cpp,.h"
+              accept="image/*,application/pdf,text/*,application/json,.md,.csv,.json,.js,.ts,.jsx,.tsx,.py,.html,.css,.yml,.yaml,.xml,.sh,.rb,.go,.rs,.java,.c,.cpp,.h,audio/*"
               className="hidden"
               onChange={(e) => {
                 if (e.target.files?.length) handleFiles(e.target.files);
                 e.target.value = '';
               }}
             />
+
+            {/* Microphone button */}
+            <button
+              type="button"
+              onClick={isRecording ? stopRecording : startRecording}
+              className={cn(
+                'inline-flex items-center justify-center rounded-lg p-2',
+                isRecording
+                  ? 'text-red-500 animate-pulse'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+              aria-label={isRecording ? 'Stop recording' : 'Record voice message'}
+              disabled={isStreaming}
+            >
+              <MicrophoneIcon size={16} />
+            </button>
 
             <textarea
               ref={textareaRef}

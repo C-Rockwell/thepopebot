@@ -1,0 +1,21 @@
+{
+  "enabled": false,
+  "stt": {
+    "provider": "groq",
+    "model": "whisper-large-v3-turbo",
+    "fallbackProvider": "openai",
+    "fallbackModel": "whisper-1",
+    "maxAudioSizeMb": 25
+  },
+  "tts": {
+    "provider": "openai",
+    "model": "tts-1",
+    "voice": "alloy",
+    "speed": 1.0,
+    "format": "opus"
+  },
+  "channels": {
+    "telegram": { "ttsEnabled": false },
+    "web": { "ttsEnabled": false, "sttEnabled": false }
+  }
+}

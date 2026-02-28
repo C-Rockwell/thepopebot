@@ -146,6 +146,19 @@ async function processChannelMessage(adapter, normalized) {
       { userId: 'telegram', chatTitle: 'Telegram' }
     );
     await adapter.sendResponse(normalized.threadId, response, normalized.metadata);
+
+    // Optional TTS: reply with voice when the inbound message was voice
+    if (adapter.supportsVoiceOutput && normalized.metadata.isVoiceMessage) {
+      try {
+        const { isTtsEnabled, synthesize } = await import('../lib/voice/tts.js');
+        if (isTtsEnabled()) {
+          const { buffer } = await synthesize(response);
+          await adapter.sendVoiceResponse(normalized.threadId, buffer, normalized.metadata);
+        }
+      } catch (ttsErr) {
+        console.warn('[voice/tts] Failed to send voice response:', ttsErr.message);
+      }
+    }
   } catch (err) {
     console.error('Failed to process message with AI:', err);
     await adapter
