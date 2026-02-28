@@ -9,6 +9,7 @@ import { BudgetPanel } from './dashboard/budget-panel.js';
 import { SystemStatusPanel } from './dashboard/system-status-panel.js';
 import { AnomalyPanel } from './dashboard/anomaly-panel.js';
 import { ActionLogPanel } from './dashboard/action-log-panel.js';
+import { MemoryBrowserPanel } from './dashboard/memory-browser-panel.js';
 
 export function DashboardPage({ session }) {
   const [data, setData] = useState(null);
@@ -104,6 +105,9 @@ export function DashboardPage({ session }) {
 
           {/* Action Log — full width */}
           <ActionLogPanel initialEntries={data.recentActions} />
+
+          {/* Memory Browser — full width, lazy loaded */}
+          <MemoryBrowserPanel memoryStats={data.memoryStats} />
         </div>
       )}
     </PageLayout>

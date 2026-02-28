@@ -36,7 +36,8 @@
     "postinstall": "node -e \"import('./bin/postinstall.js').catch(()=>{})\"",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
-    "test": "echo \"No tests yet\" && exit 0"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "ai",
@@ -90,7 +91,8 @@
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.9",
-    "esbuild": "^0.27.3"
+    "esbuild": "^0.27.3",
+    "vitest": "^2.0.0"
   },
   "engines": {
     "node": ">=18.0.0"

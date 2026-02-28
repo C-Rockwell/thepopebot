@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.0 — Pope Bot 2.0
+
+### Phase 4: Observability & Mission Control
+
+Added the Mission Control dashboard at `/dashboard` with real-time system status, kill switch, budget usage bars, anomaly alerts, and a paginated action log. Every dispatched action is now recorded to the `action_log` table with timing, status, source, and trust level. The anomaly detection system runs periodic checks for frequency spikes, off-hours activity, repeated errors, and budget warnings, creating notifications on warning/critical findings. A global kill switch stops all action dispatch and cron execution with one click, persisted across restarts. Configured via `config/OBSERVE.json`.
+
+### Phase 3: Voice & Multimodal
+
+Added full voice capabilities: multi-provider speech-to-text (Groq primary, OpenAI fallback) using the Whisper API, OpenAI text-to-speech, and a new `voice` action type for crons and triggers. Telegram now auto-transcribes voice messages and can respond with audio. The web chat interface has a microphone button for voice input. Configured via `config/VOICE.json`.
+
+### Phase 2: Persistent Memory
+
+Added a two-tier persistent memory system. Tier 1 uses SQLite FTS5 for full-text keyword search. Tier 2 adds OpenAI embeddings for semantic search (graceful degradation if unavailable). Memories are created automatically from conversations (summarized after 3+ exchanges) and job completions. Salience scores decay exponentially over time and are reinforced on access. SHA-256 checksums and poison detection protect memory integrity. The LangGraph agent can query memories via a `search_memory` tool. Configured via `config/MEMORY.json`.
+
+### Phase 1: Security Hardening
+
+Added three security layers: a sliding-window rate limiter (three tiers: API/public/Telegram) checked before authentication; per-action-type hourly budgets (`agent`, `command`, `webhook`, `voice`) that throw and notify on exhaustion; and trust classification + prompt injection sanitization for external webhook content. All features configured via `config/SECURITY.json` with sensible defaults.
+
+---
+
 ## 1.2.57
 
 ### Drizzle Kit migrations

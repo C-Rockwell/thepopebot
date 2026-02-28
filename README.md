@@ -105,6 +105,7 @@ docker compose up -d
 - **Telegram** (optional): Run `npm run setup-telegram` to connect a Telegram bot
 - **Webhook**: Send a POST to `/api/create-job` with your API key to create jobs programmatically
 - **Cron**: Edit `config/CRONS.json` to schedule recurring jobs
+- **Mission Control**: Visit `/dashboard` for the operations dashboard — kill switch, action log, budget usage, anomaly alerts, and memory browser
 
 > **Local installs**: Your server needs to be reachable from the internet for GitHub webhooks and Telegram. On a VPS/cloud server, your APP_URL is just your domain. For local development, use [ngrok](https://ngrok.com) (`ngrok http 80`) or port forwarding to expose your machine.
 >

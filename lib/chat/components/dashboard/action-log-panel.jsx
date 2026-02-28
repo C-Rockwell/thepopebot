@@ -111,13 +111,15 @@ export function ActionLogPanel({ initialEntries }) {
   const [loading, setLoading] = useState(false);
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterTrust, setFilterTrust] = useState('');
 
-  const fetchPage = useCallback(async (p, type, status) => {
+  const fetchPage = useCallback(async (p, type, status, trust) => {
     setLoading(true);
     try {
       const filters = {};
       if (type) filters.actionType = type;
       if (status) filters.status = status;
+      if (trust) filters.trustLevel = trust;
       const data = await getActionLog(p, filters);
       setEntries(data.entries || []);
       setTotal(data.total || 0);
@@ -129,10 +131,11 @@ export function ActionLogPanel({ initialEntries }) {
     }
   }, []);
 
-  function handleFilter(type, status) {
+  function handleFilter(type, status, trust) {
     setFilterType(type);
     setFilterStatus(status);
-    fetchPage(1, type, status);
+    setFilterTrust(trust);
+    fetchPage(1, type, status, trust);
   }
 
   const pageSize = 20;
@@ -145,7 +148,7 @@ export function ActionLogPanel({ initialEntries }) {
         <div className="flex gap-2">
           <select
             value={filterType}
-            onChange={(e) => handleFilter(e.target.value, filterStatus)}
+            onChange={(e) => handleFilter(e.target.value, filterStatus, filterTrust)}
             className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
           >
             <option value="">All types</option>
@@ -156,13 +159,23 @@ export function ActionLogPanel({ initialEntries }) {
           </select>
           <select
             value={filterStatus}
-            onChange={(e) => handleFilter(filterType, e.target.value)}
+            onChange={(e) => handleFilter(filterType, e.target.value, filterTrust)}
             className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
           >
             <option value="">All statuses</option>
             <option value="success">Success</option>
             <option value="error">Error</option>
             <option value="blocked">Blocked</option>
+          </select>
+          <select
+            value={filterTrust}
+            onChange={(e) => handleFilter(filterType, filterStatus, e.target.value)}
+            className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+          >
+            <option value="">All trust levels</option>
+            <option value="user-direct">user-direct</option>
+            <option value="user-indirect">user-indirect</option>
+            <option value="external-untrusted">external-untrusted</option>
           </select>
         </div>
       </div>
@@ -185,7 +198,7 @@ export function ActionLogPanel({ initialEntries }) {
           {total != null && total > pageSize && (
             <div className="flex items-center justify-between mt-3 pt-3 border-t border-border">
               <button
-                onClick={() => fetchPage(page - 1, filterType, filterStatus)}
+                onClick={() => fetchPage(page - 1, filterType, filterStatus, filterTrust)}
                 disabled={page <= 1 || loading}
                 className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50 disabled:pointer-events-none"
               >
@@ -195,7 +208,7 @@ export function ActionLogPanel({ initialEntries }) {
                 Page {page} of {totalPages}
               </span>
               <button
-                onClick={() => fetchPage(page + 1, filterType, filterStatus)}
+                onClick={() => fetchPage(page + 1, filterType, filterStatus, filterTrust)}
                 disabled={page >= totalPages || loading}
                 className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent disabled:opacity-50 disabled:pointer-events-none"
               >

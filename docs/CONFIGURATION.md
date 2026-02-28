@@ -131,3 +131,86 @@ If you're deploying to a platform where you can't run the setup script (Vercel, 
    - Redeploy
 
 Now your bot only responds to your authorized chat.
+
+---
+
+## Configuration Files
+
+Each feature area has a JSON config file in your project's `config/` directory. All files are optional — missing files or keys fall back to built-in defaults. Run `npx thepopebot init` to scaffold these files with defaults.
+
+### `config/SECURITY.json`
+
+Controls rate limiting, action budgets, and input sanitization.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `rateLimits.enabled` | `true` | Enable/disable rate limiting |
+| `rateLimits.tiers.api.maxRequests` | `60` | Max requests/min for authenticated API routes |
+| `rateLimits.tiers.public.maxRequests` | `30` | Max requests/min for public endpoints |
+| `rateLimits.tiers.telegram.maxRequests` | `20` | Max requests/min for Telegram webhook |
+| `budgets.enabled` | `true` | Enable/disable action budgets |
+| `budgets.limits.agent.maxActions` | `10` | Max agent dispatches per hour |
+| `budgets.limits.command.maxActions` | `60` | Max command dispatches per hour |
+| `budgets.limits.webhook.maxActions` | `120` | Max webhook dispatches per hour |
+| `budgets.limits.voice.maxActions` | `30` | Max voice dispatches per hour |
+| `sanitization.enabled` | `true` | Enable/disable input sanitization |
+| `sanitization.logBlocked` | `true` | Log blocked injection patterns to console |
+| `sanitization.stripPatterns` | See defaults | Array of regex strings to strip from untrusted input |
+
+---
+
+### `config/MEMORY.json`
+
+Controls the persistent memory system (FTS5 search, embeddings, salience decay).
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `true` | Enable/disable the memory system entirely |
+| `tier1.maxMemories` | `10000` | Maximum number of memories to store |
+| `tier1.decay.halfLifeMs` | `604800000` (7 days) | Half-life for exponential salience decay |
+| `tier1.decay.minScore` | `0.1` | Memories below this score are pruned |
+| `tier1.decay.reinforceAmount` | `0.3` | Salience boost when a memory is accessed |
+| `tier1.search.maxResults` | `10` | Max results returned by `searchMemories()` |
+| `tier2.enabled` | `true` | Enable vector embeddings (requires `OPENAI_API_KEY`) |
+| `tier2.model` | `text-embedding-3-small` | OpenAI embedding model |
+| `autoCapture.conversations` | `true` | Auto-summarize conversations into memory |
+| `autoCapture.jobSummaries` | `true` | Auto-store job summaries in memory |
+| `autoCapture.minExchanges` | `3` | Minimum message exchanges before auto-capture |
+| `poisonDetection.enabled` | `true` | Enable prompt injection scanning before storing |
+| `poisonDetection.patterns` | See defaults | Array of patterns that flag a memory as suspicious |
+
+---
+
+### `config/VOICE.json`
+
+Controls speech-to-text (STT), text-to-speech (TTS), and voice action type. **Disabled by default.**
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable/disable the voice system entirely |
+| `stt.primary` | `groq` | Primary STT provider (`groq` or `openai`) |
+| `stt.maxAudioSizeMb` | `25` | Maximum audio file size for transcription |
+| `tts.voice` | `alloy` | Default TTS voice |
+| `tts.speed` | `1.0` | TTS playback speed |
+| `tts.format` | `mp3` | Audio output format |
+| `telegram.autoTranscribe` | `true` | Auto-transcribe voice messages in Telegram |
+| `telegram.respondWithAudio` | `false` | Reply with TTS audio instead of text |
+
+---
+
+### `config/OBSERVE.json`
+
+Controls the observability layer: action logging, anomaly detection, and dashboard settings.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `logger.enabled` | `true` | Enable/disable action logging to `action_log` table |
+| `logger.retentionDays` | `30` | Days to keep action log entries before pruning |
+| `anomaly.enabled` | `true` | Enable/disable anomaly detection |
+| `anomaly.checkIntervalMs` | `900000` (15 min) | How often anomaly checks run |
+| `anomaly.offHoursStart` | `23` | Hour (0–23) when off-hours period begins |
+| `anomaly.offHoursEnd` | `6` | Hour (0–23) when off-hours period ends |
+| `anomaly.offHoursThreshold` | `5` | Actions during off-hours before an alert fires |
+| `anomaly.errorThreshold` | `3` | Same-action errors in 1 hour before an alert fires |
+| `anomaly.spikeMultiplier` | `3` | Rolling-average multiplier to detect frequency spikes |
+| `dashboard.actionLogPageSize` | `20` | Rows per page in the action log panel |

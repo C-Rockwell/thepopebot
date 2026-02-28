@@ -10,6 +10,71 @@ thepopebot includes several security measures by default:
 - **Secret filtering in Docker agent** — The `env-sanitizer` extension filters `AGENT_*` secrets from the LLM's bash subprocess, preventing the agent from accessing protected credentials.
 - **Auto-merge path restrictions** — The `auto-merge.yml` workflow only merges PRs where all changed files fall within `ALLOWED_PATHS` (default: `/logs`). Changes outside allowed paths require manual review.
 - **Server Actions with session checks** — All browser-to-server mutations use Next.js Server Actions with `requireAuth()`, which validates the session cookie before executing.
+- **Rate limiting** — Sliding-window rate limiter on all `/api` routes, checked before authentication. Three tiers: API, public, and Telegram.
+- **Action budgets** — Per-action-type hourly budgets prevent runaway cron/trigger execution. Exhaustion triggers a notification and stops further dispatches.
+- **Trust classification & input sanitization** — Incoming requests are tagged with a trust level (`user-direct`, `user-indirect`, `external-untrusted`). Only untrusted content (GitHub/public webhooks) is sanitized for prompt injection patterns.
+- **Kill switch** — A global pause switch that stops all action dispatch, trigger processing, and cron jobs immediately. Persists across server restarts. Accessible from the Mission Control dashboard.
+
+## Rate Limiting
+
+All `/api` requests pass through a sliding-window rate limiter before authentication. This blocks brute-force attacks without exposing the authentication system to unbounded traffic.
+
+| Tier | Routes | Default limit |
+|------|--------|---------------|
+| `api` | Authenticated `/api/*` routes | 60 req/min |
+| `public` | `/ping`, `/github/webhook` | 30 req/min |
+| `telegram` | `/telegram/webhook` | 20 req/min |
+
+Rate-limited responses return HTTP 429 with a `Retry-After` header. State is in-memory (not persisted across restarts). Configure limits in `config/SECURITY.json` under `rateLimits.tiers`.
+
+---
+
+## Action Budgets
+
+Every dispatched action (agent, command, webhook, voice) is checked against a per-type hourly budget before execution.
+
+| Action type | Default budget |
+|-------------|---------------|
+| `agent` | 10/hour |
+| `command` | 60/hour |
+| `webhook` | 120/hour |
+| `memory_summarize` | 5/hour |
+| `voice` | 30/hour |
+
+When a budget is exhausted, `executeAction()` throws and a notification is created (distributed to Telegram subscribers). The budget resets automatically when the time window expires. Configure limits in `config/SECURITY.json` under `budgets.limits`.
+
+---
+
+## Trust Classification & Input Sanitization
+
+Every incoming request is tagged with a trust level before processing.
+
+| Source | Trust level | Sanitized? |
+|--------|-------------|-----------|
+| `x-api-key` auth | `user-direct` | No |
+| Telegram webhook | `user-indirect` | No |
+| GitHub/public webhook | `external-untrusted` | Yes |
+
+Only `external-untrusted` content is sanitized. Sanitization strips configurable prompt injection patterns (e.g., "ignore previous instructions", "you are now") and replaces them with `[blocked]`. When `logBlocked` is `true` (default), blocked patterns are logged to the console.
+
+Configure patterns in `config/SECURITY.json` under `sanitization.stripPatterns`.
+
+---
+
+## Kill Switch
+
+The kill switch is a global emergency stop. When active:
+
+- All `executeAction()` calls throw immediately (no actions dispatched)
+- `fireTriggers()` returns immediately (no triggers processed)
+- All cron tasks are stopped
+- All `/api` routes return `503 Service Unavailable`, except `/ping` and `/github/webhook`
+
+State is persisted to the `settings` table, so it survives server restarts. When deactivated, crons restart automatically.
+
+Toggle the kill switch from the Mission Control dashboard (`/dashboard`) or via the `toggleKillSwitch()` server action.
+
+---
 
 ## Disclaimer
 
